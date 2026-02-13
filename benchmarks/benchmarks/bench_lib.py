@@ -253,3 +253,62 @@ class Isin(Benchmark):
 
     def time_isin(self, size, highest_element):
         np.isin(self.array, self.in_array)
+
+
+class IsinTableOverlap(Benchmark):
+    """Benchmarks for `numpy.isin` integer table-method paths.
+
+    Tests the clipped-indexing optimisation across three overlap regimes
+    that determine whether the new fast path or the original masking path
+    is taken:
+
+    - "high"  (p_in ~ 50 %): most ar1 values inside ar2's range
+    - "low"   (p_in ~ 0.1 %): almost no ar1 values inside ar2's range
+    - "all"   (p_in = 100 %): every ar1 value inside ar2's range
+    """
+
+    params = (
+        [10_000, 1_000_000],            # N  (ar1 size)
+        ["high", "low", "all"],         # overlap regime
+        [False, True],                  # invert
+    )
+    param_names = ["N", "overlap", "invert"]
+
+    def setup(self, N, overlap, invert):
+        rng = np.random.default_rng(42)
+
+        ar2_min = 100_000
+        ar2_max = 110_000                       # ar2_range = 10_000
+        self.b = rng.integers(ar2_min, ar2_max + 1, size=1000)
+
+        if overlap == "high":
+            # ~50 % of ar1 inside [ar2_min, ar2_max]
+            n_in = N // 2
+            n_out = N - n_in
+            parts = [
+                rng.integers(ar2_min, ar2_max + 1, size=n_in),
+                rng.integers(0, ar2_min, size=n_out // 2),
+                rng.integers(ar2_max + 1, ar2_max + 100_000,
+                             size=n_out - n_out // 2),
+            ]
+            self.a = np.concatenate(parts)
+            rng.shuffle(self.a)
+        elif overlap == "low":
+            # ~0.1 % of ar1 inside range
+            n_in = max(1, N // 1000)
+            n_out = N - n_in
+            parts = [
+                rng.integers(ar2_min, ar2_max + 1, size=n_in),
+                rng.integers(0, ar2_min, size=n_out // 2),
+                rng.integers(ar2_max + 1, ar2_max + 100_000,
+                             size=n_out - n_out // 2),
+            ]
+            self.a = np.concatenate(parts)
+            rng.shuffle(self.a)
+        else:  # "all"
+            self.a = rng.integers(ar2_min, ar2_max + 1, size=N)
+
+        self.invert = invert
+
+    def time_isin(self, N, overlap, invert):
+        np.isin(self.a, self.b, invert=self.invert)
